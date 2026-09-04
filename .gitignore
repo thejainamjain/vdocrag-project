@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data & model artifacts (too big for git — track via scripts, not commits)
+data/raw/
+data/processed/
+outputs/
+*.pkl
+*.pt
+*.bin
+*.safetensors
+wandb/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
