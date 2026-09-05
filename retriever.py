@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
-from vdocrag.telemetry import log_call, logger
+from vdocrag_app.telemetry import log_call, logger
 
 # torch and ModelManager are imported lazily inside methods that need them
 # (see note in encode_query) -- this keeps build_query_prompt/prepare_doc_image

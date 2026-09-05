@@ -177,12 +177,16 @@ but found strong precedent: `Tevatron/dse-phi3-docmatix-v1` — a sibling model 
 the exact toolkit VDocRAG is built on, and one of the paper's own retrieval
 baselines — loads via a thin pass-through wrapper around plain
 `AutoModelForCausalLM.from_pretrained(..., attn_implementation="flash_attention_2", ...)`,
-i.e. the kwarg is forwarded, not hardcoded inside a custom loader. Working
-assumption: `VDocRetriever.load(path, attn_implementation="eager", quantization_config=bnb_config)`
-should work unmodified. **Action item, first thing in Step 3**: open
-`src/vdocrag/retriever.py`'s actual `load()` signature after cloning and confirm
-this directly — 30 seconds, removes the last uncertainty before building the wrapper.
-If it turns out to be hardcoded, see the modification-clause note in 4.5.
+i.e. the kwarg is forwarded, not hardcoded inside a custom loader. **This is now
+directly confirmed** by cloning and reading their actual source
+(`src/vdocrag/vdocretriever/modeling/vdocretriever.py`) — see
+`docs/ntt_api_reference.md` for the full confirmed API surface, including the
+more significant finding that `load()` calls `merge_and_unload()` internally
+when given a LoRA adapter, which affects the Section 4.4 shared-model decision
+(resolved via a `share_base_model` config flag in `vdocrag_app/model_manager.py`
+— both the VRAM-optimal shared/hot-swap path and NTT's simpler tested
+independent-`.load()` path are implemented, selectable without other code
+changes).
 
 ### 4.2 — Don't reimplement "dynamic cropping" (unchanged, reaffirmed)
 Phi-3-vision's own `AutoProcessor` handles dynamic-resolution image splitting
@@ -266,7 +270,22 @@ overriding behavior from *your* wrapper code (subclassing, monkey-patching a cla
 attribute from your own module) rather than editing their shipped files — check
 this during Step 3 before assuming either path is needed.
 
-### 4.6 — Whole-page-only retrieval granularity (unchanged from v1)
+### 4.6a — `vdocrag` vs `vdocrag_app`: a naming collision found the hard way
+Our own local package was originally named `vdocrag`. NTT's released package is
+**also** named `vdocrag` (`setup(name='vdocrag', ...)` in their `setup.py`, read
+during the Section 4.1 research pass — the name was visible then, but the
+collision risk wasn't connected until it actually broke). Two non-namespace
+Python packages can't share a top-level name on `sys.path`: Python resolves
+whichever is found first, and the other's submodules become invisible under
+that name. This surfaced as `ModuleNotFoundError: No module named
+'vdocrag.telemetry'` when actually running Step 1 in Colab — our package was
+correctly on `sys.path`, but Python had already resolved `vdocrag` to NTT's
+installed package first. Fixed by renaming our local package to `vdocrag_app`
+throughout the repo (imports, notebook, docs). Concrete example of why reading
+source and actually running code catch different classes of problem — this one
+was sitting in plain sight in a file we'd already read.
+
+### 4.7 — Whole-page-only retrieval granularity (unchanged from v1)
 Known limitation of the paper's own approach, not something to "fix" in this base
 implementation. Stated explicitly so imperfect fine-detail accuracy isn't mistaken
 for a reproduction bug.

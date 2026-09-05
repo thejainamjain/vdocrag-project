@@ -25,7 +25,7 @@ Section 6.1 and `docs/ntt_api_reference.md` for what it checks and why.
 ## Repo layout
 
 ```
-vdocrag/
+vdocrag_app/
 ├── telemetry.py      # structured JSONL logging + timing/VRAM instrumentation
 ├── ingest.py         # PDF -> per-page PIL images (tested against a real PDF)
 ├── limits.py         # page-count UX cap, formula-driven from real telemetry

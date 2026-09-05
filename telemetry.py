@@ -10,7 +10,7 @@ formula (limits.py) and the VRAM-sharing decision both need: real numbers,
 not guesses.
 
 Usage:
-    from vdocrag.telemetry import setup_logging, log_call
+    from vdocrag_app.telemetry import setup_logging, log_call
 
     setup_logging("session_2026_09_04")
 

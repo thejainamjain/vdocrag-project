@@ -11,8 +11,8 @@ from typing import List
 
 from PIL import Image
 
-from vdocrag.retriever import prepare_doc_image
-from vdocrag.telemetry import log_call, logger
+from vdocrag_app.retriever import prepare_doc_image
+from vdocrag_app.telemetry import log_call, logger
 
 # Matches NTT's test.py exactly: "\n Answer briefly." is their instruction
 # suffix for getting short, direct answers rather than verbose completions --

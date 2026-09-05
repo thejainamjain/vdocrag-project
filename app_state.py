@@ -12,10 +12,10 @@ from typing import List, Optional
 
 from PIL import Image
 
-from vdocrag.index import DocumentIndex, PageMetadata
-from vdocrag.ingest import PDFIngestError, page_count, pdf_to_images
-from vdocrag.limits import estimated_wait_s, page_cap
-from vdocrag.telemetry import log_call, logger
+from vdocrag_app.index import DocumentIndex, PageMetadata
+from vdocrag_app.ingest import PDFIngestError, page_count, pdf_to_images
+from vdocrag_app.limits import estimated_wait_s, page_cap
+from vdocrag_app.telemetry import log_call, logger
 
 PAGE_CACHE_DIR = Path("/content/drive/MyDrive/vdocrag-project/page_cache")
 INDEX_DIR = Path("/content/drive/MyDrive/vdocrag-project/faiss_index")

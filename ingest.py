@@ -14,7 +14,7 @@ from typing import List
 from pdf2image import convert_from_path, pdfinfo_from_path
 from PIL import Image
 
-from vdocrag.telemetry import log_call, logger
+from vdocrag_app.telemetry import log_call, logger
 
 # Paper's own quickstart resizes to 1344x1344 before handing off to the
 # processor (Section 4.2 of the handoff doc); we rasterize at a DPI that

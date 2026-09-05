@@ -26,7 +26,7 @@ from typing import List, Optional
 import faiss
 import numpy as np
 
-from vdocrag.telemetry import log_call, logger
+from vdocrag_app.telemetry import log_call, logger
 
 
 @dataclass

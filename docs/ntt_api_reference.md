@@ -5,7 +5,7 @@ Everything below was read directly from `github.com/nttmdlab-nlp/VDocRAG`
 `src/vdocrag/vdocgenerator/modeling/vdocgenerator.py`, `test.py`, `README.md`,
 `src/vdocrag/vdocretriever/arguments.py`) — not reconstructed from the paper's
 prose, not inferred from a sibling model. Where our wrapper code
-(`vdocrag/retriever.py`, `vdocrag/generator.py`, `vdocrag/model_manager.py`)
+(`vdocrag_app/retriever.py`, `vdocrag_app/generator.py`, `vdocrag_app/model_manager.py`)
 depends on one of these facts, it's cited back to here.
 
 ## `VDocRetriever`
@@ -40,7 +40,7 @@ class VDocRetriever(nn.Module):
 - `normalize=True` (also explicit in their example, not the class default of
   `False`) — L2-normalizes both query and document representations, which is
   what makes `IndexFlatIP` (inner product) equivalent to cosine similarity in
-  `vdocrag/index.py`.
+  `vdocrag_app/index.py`.
 
 ## `VDocGenerator`
 
@@ -63,19 +63,19 @@ the underlying HF `.generate()`.
 Instruct: I'm looking for an image that answers the question.
 Query: {question}</s>
 ```
-(`vdocrag/retriever.py`'s `QUERY_PROMPT_TEMPLATE` / `build_query_prompt()`)
+(`vdocrag_app/retriever.py`'s `QUERY_PROMPT_TEMPLATE` / `build_query_prompt()`)
 
 **Document prompt** (retrieval):
 ```
 <|image_1|>
 What is shown in this image?</s>
 ```
-(`vdocrag/retriever.py`'s `DOC_PROMPT`)
+(`vdocrag_app/retriever.py`'s `DOC_PROMPT`)
 
 **Generation prompt**: built via `processor.tokenizer.apply_chat_template()` on
 a single user message: `f"{image_tokens}\n{question}\n Answer briefly."`, where
 `image_tokens` is `"<|image_1|>\n<|image_2|>\n..."` for however many images are
-being passed. (`vdocrag/generator.py`'s `build_chat_prompt()` / `build_image_tokens()`)
+being passed. (`vdocrag_app/generator.py`'s `build_chat_prompt()` / `build_image_tokens()`)
 
 **Generation args** (matches their example exactly):
 ```python
@@ -84,7 +84,7 @@ being passed. (`vdocrag/generator.py`'s `build_chat_prompt()` / `build_image_tok
 
 **Document image size**: every page image is resized to exactly `(1344, 1344)`
 before processing — this is the size their checkpoints were fine-tuned against,
-not a free parameter (`vdocrag/retriever.py`'s `prepare_doc_image()`).
+not a free parameter (`vdocrag_app/retriever.py`'s `prepare_doc_image()`).
 
 **Processor max_length**: `256` for queries, `4096` for documents — matches
 their `query_inputs`/`doc_inputs` processor calls exactly.

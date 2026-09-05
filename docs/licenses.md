@@ -58,7 +58,7 @@ wrapper**. Calling `.load()` independently for the retriever and generator (as
 NTT's own `test.py` does — sequentially, reusing one variable name, never both
 resident at once) produces two fully separate merged models with nothing left to
 hot-swap. This directly affects the shared-base-model decision from the
-handoff doc's Section 4.4 — see `vdocrag/model_manager.py`'s module docstring for
+handoff doc's Section 4.4 — see `vdocrag_app/model_manager.py`'s module docstring for
 the resolution (a `share_base_model` config flag supporting both the VRAM-optimal
 shared/hot-swap path, built by calling `VDocRetriever(encoder=...)` /
 `VDocGenerator(decoder=...)` directly rather than through `.load()`, and a

@@ -1,5 +1,5 @@
 """
-Gradio Blocks app -- thin UI wiring over vdocrag.app_state.VDocRAGApp. Every
+Gradio Blocks app -- thin UI wiring over vdocrag_app.app_state.VDocRAGApp. Every
 callback here does argument marshalling (Gradio types <-> plain Python) and
 error-to-UI-message translation only; the actual logic is in app_state.py and
 already has direct test coverage that doesn't depend on Gradio at all.
@@ -14,12 +14,12 @@ from pathlib import Path
 
 import gradio as gr
 
-from vdocrag.app_state import PageCapExceeded, VDocRAGApp
-from vdocrag.generator import VDocGeneratorWrapper
-from vdocrag.ingest import PDFIngestError
-from vdocrag.model_manager import ModelManager, ModelManagerConfig
-from vdocrag.retriever import VDocRetrieverWrapper
-from vdocrag.telemetry import logger, setup_logging
+from vdocrag_app.app_state import PageCapExceeded, VDocRAGApp
+from vdocrag_app.generator import VDocGeneratorWrapper
+from vdocrag_app.ingest import PDFIngestError
+from vdocrag_app.model_manager import ModelManager, ModelManagerConfig
+from vdocrag_app.retriever import VDocRetrieverWrapper
+from vdocrag_app.telemetry import logger, setup_logging
 
 
 def on_index_pdf(vdocrag_app: VDocRAGApp, pdf_file, progress=None):

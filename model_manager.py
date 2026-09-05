@@ -39,7 +39,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
-from vdocrag.telemetry import log_call, logger
+from vdocrag_app.telemetry import log_call, logger
 
 # torch is imported lazily inside methods that actually load models (setup(),
 # vram_report()) rather than at module level. This keeps ModelManagerConfig
