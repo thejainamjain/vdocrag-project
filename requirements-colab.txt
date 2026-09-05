@@ -1,0 +1,21 @@
+# Installed fresh at the start of every Colab session (never vendored — see
+# docs/licenses.md for why NTT's package specifically must be installed by
+# URL rather than copied into this repo).
+#
+# poppler-utils (system package, not pip) is required by pdf2image and must
+# be installed separately: !apt-get install -y poppler-utils
+
+transformers==4.42.0
+accelerate
+bitsandbytes
+peft
+pillow
+pdf2image
+faiss-cpu
+gradio
+pandas
+
+# NTT's VDocRAG package — pinned to a commit once Step 1 passes and the repo
+# state we tested against is known-good; unpinned for now during initial
+# smoke testing.
+git+https://github.com/nttmdlab-nlp/VDocRAG.git
