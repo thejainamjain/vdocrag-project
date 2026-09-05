@@ -51,6 +51,26 @@ MODEL_ID = "microsoft/Phi-3-vision-128k-instruct"
 RETRIEVER_ADAPTER = "NTT-hil-insight/VDocRetriever-Phi3-vision"
 GENERATOR_ADAPTER = "NTT-hil-insight/VDocGenerator-Phi3-vision"
 
+
+def _ensure_transformers_compat_shims() -> None:
+    """NTT's vdocretriever.py / vdocgenerator.py import `AutoModelForVision2Seq`
+    at module level, unconditionally. That symbol is a long-deprecated alias
+    for `AutoModelForImageTextToText` and has been removed from `transformers`
+    ahead of the officially documented v5.0 cutoff (confirmed empirically in
+    Step 1: `ImportError: cannot import name 'AutoModelForVision2Seq'` even on
+    a pinned 4.x release). NTT's own retriever/generator actually load via
+    `AutoModelForCausalLM` (TRANSFORMER_CLS in their source) -- the missing
+    symbol is dead code in their file, never actually called -- so providing
+    a working alias unblocks the import without touching their shipped files
+    (legitimate under the license's no-modification clause: this patches what
+    our own code sees when importing `transformers`, not their source)."""
+    import transformers
+
+    if not hasattr(transformers, "AutoModelForVision2Seq"):
+        transformers.AutoModelForVision2Seq = transformers.AutoModelForImageTextToText
+        logger.info("Shimmed AutoModelForVision2Seq -> AutoModelForImageTextToText")
+
+
 ShareMode = Literal["shared", "independent"]
 
 
@@ -115,6 +135,8 @@ class ModelManager:
             logger.info("ModelManager.setup() called again -- already loaded, skipping.")
             return
 
+        _ensure_transformers_compat_shims()
+
         from transformers import AutoProcessor
 
         self.processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -127,6 +149,23 @@ class ModelManager:
         self._loaded = True
         logger.info(f"ModelManager ready in '{self.mode}' mode.")
 
+    def _load_config(self):
+        """Builds the model config with attn_implementation set as a direct
+        attribute rather than passed as a from_pretrained() kwarg. Confirmed
+        necessary empirically in Step 1 (see handoff doc Section 4.3 update):
+        passing attn_implementation="eager" as a plain from_pretrained() kwarg
+        raised `ValueError: Phi3VForCausalLM does not support Flash Attention 2
+        yet` even though flash attention was never requested -- something in
+        this environment's attention-implementation validation path mishandles
+        the kwarg-based route for this custom trust_remote_code model. Setting
+        it directly on the config object before from_pretrained() bypasses
+        whatever that path does differently and is confirmed working."""
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(MODEL_ID, trust_remote_code=True)
+        config._attn_implementation = self.config.attn_implementation
+        return config
+
     @log_call("model_manager")
     def _setup_shared(self) -> None:
         from peft import PeftModel
@@ -137,10 +176,10 @@ class ModelManager:
 
         base_model = AutoModelForCausalLM.from_pretrained(
             MODEL_ID,
+            config=self._load_config(),
             trust_remote_code=True,
             device_map="cuda",
             torch_dtype=self.config.resolved_dtype,
-            attn_implementation=self.config.attn_implementation,
             quantization_config=self._bnb_config(),
         )
         if base_model.config.pad_token_id is None:
@@ -170,15 +209,16 @@ class ModelManager:
 
         common_kwargs = dict(
             trust_remote_code=True,
-            attn_implementation=self.config.attn_implementation,
             torch_dtype=self.config.resolved_dtype,
             quantization_config=self._bnb_config(),
         )
         self._retriever_model = VDocRetriever.load(
-            MODEL_ID, lora_name_or_path=RETRIEVER_ADAPTER, pooling="eos", normalize=True, **common_kwargs
+            MODEL_ID, lora_name_or_path=RETRIEVER_ADAPTER, pooling="eos", normalize=True,
+            config=self._load_config(), **common_kwargs
         ).to("cuda:0")
         self._generator_model = VDocGenerator.load(
-            MODEL_ID, lora_name_or_path=GENERATOR_ADAPTER, **common_kwargs
+            MODEL_ID, lora_name_or_path=GENERATOR_ADAPTER,
+            config=self._load_config(), **common_kwargs
         ).to("cuda:0")
 
     def use_retriever(self):

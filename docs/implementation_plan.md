@@ -270,6 +270,72 @@ overriding behavior from *your* wrapper code (subclassing, monkey-patching a cla
 attribute from your own module) rather than editing their shipped files — check
 this during Step 3 before assuming either path is needed.
 
+### 4.6b — Pin `transformers==4.57.3`, confirmed necessary the hard way
+Dropping the `transformers==4.42.0` pin (Section 4.6a's tokenizers wheel-build
+fix) without replacing it with *any* pin let pip install whatever was latest —
+which turned out to be **transformers 5.16.1**, a full major version ahead of
+everything this codebase was built against. Confirmed directly in Step 1:
+`attn_implementation="eager"` silently failed with
+`ValueError: Phi3VForCausalLM does not support Flash Attention 2 yet`, despite
+never requesting flash attention — transformers 5.x's refactored internal
+attention-dispatch logic (`_check_and_adjust_attn_implementation`, replacing
+the older per-model `PHI3_ATTENTION_CLASSES`-style dispatch Phi-3-vision's
+custom code uses) doesn't correctly honor an explicit `eager` request for this
+older custom-code model. Confirmed via PyPI release history that `4.57.3`
+(Nov 25, 2025) is the last stable 4.x release before the 5.0 line began —
+late enough to have modern prebuilt wheels (fixing the original tokenizers
+issue), but still in the 4.x API generation Phi-3-vision's `modeling_phi3_v.py`
+and NTT's checkpoints were actually built against. Pinned in both
+`requirements-colab.txt` and the smoke-test notebook.
+
+### 4.6d — `attn_implementation` as a kwarg still misroutes even after the version pin; set it on the config object instead
+Even after pinning `transformers==4.57.3`, passing `attn_implementation="eager"`
+directly as a `from_pretrained()` kwarg still raised the same `ValueError:
+Phi3VForCausalLM does not support Flash Attention 2 yet` — despite flash
+attention never being requested. Root cause not fully isolated (something in
+this environment's attention-implementation validation path mishandles the
+kwarg-based route specifically for this custom `trust_remote_code` model), but
+the fix is confirmed and stable: build the config object first and set the
+attribute directly, before calling `from_pretrained()`:
+```python
+config = AutoConfig.from_pretrained(MODEL_ID, trust_remote_code=True)
+config._attn_implementation = "eager"
+model = AutoModelForCausalLM.from_pretrained(MODEL_ID, config=config, ...)
+```
+This resolved Check 1 immediately (confirmed: VRAM after base load 2.44GB,
+peak 2.57GB — closely matching the ~2.36GB analytical estimate in Section
+4.4). Applied in both the notebook and `vdocrag_app/model_manager.py`'s new
+`_load_config()` helper, used by both the shared and independent loading
+paths. One related fix needed in `model_manager.py`: `_setup_independent()`
+calls `.load()` twice (retriever, then generator) — reusing one `config`
+object across both calls risks `from_pretrained()` mutating it in place on the
+first call and affecting the second, so each `.load()` call gets its own fresh
+`_load_config()` result rather than sharing one.
+
+### 4.6e — NTT's own file imports a symbol transformers has already removed
+`vdocretriever.py` / `vdocgenerator.py` import `AutoModelForVision2Seq` at
+module level, unconditionally. That class is a long-deprecated alias for
+`AutoModelForImageTextToText`, officially documented as removed only in
+transformers v5.0 — but confirmed empirically here that it's already gone even
+on the pinned `4.57.3`, raising `ImportError: cannot import name
+'AutoModelForVision2Seq'` the moment anything imports NTT's retriever/generator
+modeling files. NTT's own code actually loads via `AutoModelForCausalLM`
+(`TRANSFORMER_CLS` in their source, confirmed in `docs/ntt_api_reference.md`)
+— `AutoModelForVision2Seq` is dead code in their file, never actually called.
+Fix: provide a working alias before their module gets imported, rather than
+chase an ever-narrower version pin that satisfies wheel availability, Phi-3V's
+attention-dispatch compatibility, *and* this symbol's presence simultaneously:
+```python
+import transformers
+if not hasattr(transformers, "AutoModelForVision2Seq"):
+    transformers.AutoModelForVision2Seq = transformers.AutoModelForImageTextToText
+```
+Legitimate under the license's no-modification clause — this patches what our
+own code sees when importing `transformers`, not any of NTT's shipped files.
+Applied as `_ensure_transformers_compat_shims()` in
+`vdocrag_app/model_manager.py` (called at the top of `setup()`, before any
+lazy import of NTT's package) and as its own cell in the smoke-test notebook.
+
 ### 4.6a — `vdocrag` vs `vdocrag_app`: a naming collision found the hard way
 Our own local package was originally named `vdocrag`. NTT's released package is
 **also** named `vdocrag` (`setup(name='vdocrag', ...)` in their `setup.py`, read
