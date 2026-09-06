@@ -87,6 +87,14 @@ def _ensure_transformers_compat_shims() -> None:
         DynamicCache.get_max_length = lambda self: self.get_max_cache_shape()
         logger.info("Patched DynamicCache.get_max_length() -> get_max_cache_shape()")
 
+    # A third method in the same removed-API family, hit only if generation is
+    # ever run with use_cache=True (our default is use_cache=False -- see
+    # generator.py -- which sidesteps this whole call path; patched here too
+    # for defense in depth, in case caching is ever re-enabled for speed).
+    if not hasattr(DynamicCache, "get_usable_length"):
+        DynamicCache.get_usable_length = lambda self, new_seq_length, layer_idx=0: self.get_seq_length(layer_idx)
+        logger.info("Patched DynamicCache.get_usable_length() -> get_seq_length()")
+
 
 ShareMode = Literal["shared", "independent"]
 
@@ -288,3 +296,4 @@ class ModelManager:
             }
         except Exception:
             return {"vram_allocated_gb": 0.0, "vram_peak_gb": 0.0}
+        

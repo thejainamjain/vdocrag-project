@@ -71,7 +71,16 @@ class VDocGeneratorWrapper:
         if generation_args:
             args.update(generation_args)
 
-        generate_ids = model.generate(processed, generation_args=args)
+        generate_ids = model.generate(processed, generation_args=args, use_cache=False)
+        # use_cache=False confirmed necessary in Step 1, not just a performance
+        # choice: Phi-3-vision's frozen prepare_inputs_for_generation() touches
+        # several Cache-object methods that newer transformers has renamed
+        # (see model_manager.py's _ensure_transformers_compat_shims() for the
+        # three confirmed cases). use_cache=False skips that code path
+        # entirely rather than requiring every renamed method to be found and
+        # patched one at a time -- confirmed working live against Check 3b.
+        # Cost: generation recomputes rather than reuses key/value states,
+        # slower per-token -- acceptable for demo-scale max_new_tokens=64.
         # strip the input prompt tokens back off -- matches NTT's own
         # test.py slicing exactly (generate() returns prompt+completion together)
         generate_ids = generate_ids[:, processed["input_ids"].shape[1]:]
@@ -87,3 +96,4 @@ class VDocGeneratorWrapper:
             }},
         )
         return response
+    

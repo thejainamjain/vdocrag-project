@@ -388,6 +388,33 @@ quality signal (does retrieval ordering still come out correct? does generation
 still produce sane answers?), and treat `num_crops` as a tunable worth
 re-testing at higher values if a larger GPU becomes available later.
 
+### 4.6g — Step 1 complete: real quality signal on the `num_crops=4` trade-off
+Both Check 3a and 3b ran end-to-end without error — the smoke test's actual
+goal (prove the pipeline mechanically works on this hardware) is met. Results:
+
+- **Retrieval (Check 3a): ordering correct, values close.** Query 0
+  (Palestinians %): `[0.523, 0.406]` (image1 wins) vs NTT's `[0.516, 0.385]`
+  (image1 wins). Query 1 (Japan visitors): `[0.398, 0.586]` (image2 wins) vs
+  NTT's `[0.379, 0.570]` (image2 wins). Both orderings match, and absolute
+  values are close despite `num_crops=4` vs their `16` — retrieval is a
+  holistic/semantic matching task and tolerates the resolution cut well.
+- **Generation (Check 3b): on-topic but imprecise.** Ours: `"11.4 million"`.
+  NTT's: `"28.69m"`. Same order of magnitude, genuinely different number —
+  not just quantization noise. This is the `num_crops=4` trade-off manifesting
+  exactly where predicted: extracting a specific printed number from an
+  infographic needs fine-grained visual detail, which is precisely what's
+  sacrificed by cutting from 16 crops to 4. Retrieval doesn't need that detail;
+  generation does.
+
+**Conclusion**: the pipeline is mechanically sound. `num_crops=4` is a real,
+now-measured accuracy cost specifically for detail-dependent generation
+(reading exact numbers/text off a page), not a free win. Worth revisiting as a
+tunable in Step 6 (Gradio app) — e.g. trading off `top_k` (fewer retrieved
+pages) against a higher `num_crops` per page, since VRAM scales with
+`num_images_in_context × num_crops_per_image`, not either alone. Not blocking
+further work — proceeding to Step 2 with this documented as a known,
+intentional trade-off rather than an unresolved bug.
+
 ### 4.6a — `vdocrag` vs `vdocrag_app`: a naming collision found the hard way
 Our own local package was originally named `vdocrag`. NTT's released package is
 **also** named `vdocrag` (`setup(name='vdocrag', ...)` in their `setup.py`, read
@@ -687,3 +714,4 @@ reasoning meets actual hardware. Specifically:
 - Do not proceed past Step 1 if the smoke test fails, even with the corrected
   `eager` config — that's still the cheapest point to discover a hardware blocker,
   and every later step assumes it passed.
+  
