@@ -70,6 +70,23 @@ def _ensure_transformers_compat_shims() -> None:
         transformers.AutoModelForVision2Seq = transformers.AutoModelForImageTextToText
         logger.info("Shimmed AutoModelForVision2Seq -> AutoModelForImageTextToText")
 
+    # Phi-3-vision's frozen prepare_inputs_for_generation() reads two Cache
+    # attributes/methods that newer transformers has renamed -- this exact
+    # two-part breakage is documented across many custom-code models (Phi-3,
+    # MiniCPM, GOT-OCR, DeepSeek-OCR all hit it identically), confirmed
+    # empirically here via Check 3b: `AttributeError: 'DynamicCache' object
+    # has no attribute 'seen_tokens'`, immediately followed by the same class
+    # of error on get_max_length() one line later if left unpatched.
+    from transformers.cache_utils import DynamicCache
+
+    if not hasattr(DynamicCache, "seen_tokens"):
+        DynamicCache.seen_tokens = property(lambda self: self.get_seq_length())
+        logger.info("Patched DynamicCache.seen_tokens -> get_seq_length()")
+
+    if not hasattr(DynamicCache, "get_max_length"):
+        DynamicCache.get_max_length = lambda self: self.get_max_cache_shape()
+        logger.info("Patched DynamicCache.get_max_length() -> get_max_cache_shape()")
+
 
 ShareMode = Literal["shared", "independent"]
 
@@ -85,6 +102,17 @@ class ModelManagerConfig:
     # via `resolved_dtype` below -- kept as a string here so this dataclass
     # (and everything that imports it) stays importable without torch present.
     load_in_4bit: bool = True
+    num_crops: int = 4  # NOT the model's default of 16 -- see handoff doc Section
+    # 6.1 update. Confirmed empirically that num_crops (a processor setting), not
+    # image pixel size, controls actual token count / eager-attention memory cost
+    # -- resizing images does NOT reliably reduce memory and can even increase
+    # token count depending on aspect ratio. Default 16 produces ~2300+ tokens/
+    # image under eager attention and OOMs a T4 on a single image. 4 is
+    # Microsoft's own suggested value for memory-constrained use, cutting
+    # attention cost roughly (4/16)^2. Real trade-off, not a free win: NTT's
+    # checkpoints were fine-tuned against the default (their test.py never
+    # overrides this), so retrieval/generation quality may be affected --
+    # revisit once the pipeline runs end-to-end and real quality data exists.
 
     @property
     def resolved_dtype(self):
@@ -139,7 +167,9 @@ class ModelManager:
 
         from transformers import AutoProcessor
 
-        self.processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        self.processor = AutoProcessor.from_pretrained(
+            MODEL_ID, trust_remote_code=True, num_crops=self.config.num_crops
+        )
 
         if self.mode == "shared":
             self._setup_shared()

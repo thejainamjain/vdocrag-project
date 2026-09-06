@@ -336,6 +336,58 @@ Applied as `_ensure_transformers_compat_shims()` in
 `vdocrag_app/model_manager.py` (called at the top of `setup()`, before any
 lazy import of NTT's package) and as its own cell in the smoke-test notebook.
 
+### 4.6f — Two more frozen-code/library-version mismatches, both confirmed in Check 3
+Two further breaks, both surfaced by actually running Check 3, both following
+the exact same root pattern as 4.6e (Phi-3-vision's custom code was frozen
+against an older transformers internal API):
+
+**`DynamicCache.seen_tokens` removed.** `prepare_inputs_for_generation()`
+reads `past_key_values.seen_tokens` — deprecated since transformers 4.41,
+confirmed removed by the version we're pinned to. This turns out to be an
+extremely common breakage: identical fixes exist in community patches for
+Phi-3 (medium), MiniCPM, MiniCPM3, GOT-OCR2.0, and DeepSeek-OCR — all frozen
+custom-code models sharing the same few-years-old `prepare_inputs_for_generation`
+template. The line immediately after it, `get_max_length()`, is renamed to
+`get_max_cache_shape()` in the same transformers refactor — confirmed by the
+same set of community patches fixing both in one pass. Fixed with class-level
+monkey-patches on `DynamicCache` (not editing any shipped file):
+```python
+from transformers.cache_utils import DynamicCache
+if not hasattr(DynamicCache, "seen_tokens"):
+    DynamicCache.seen_tokens = property(lambda self: self.get_seq_length())
+if not hasattr(DynamicCache, "get_max_length"):
+    DynamicCache.get_max_length = lambda self: self.get_max_cache_shape()
+```
+Added to the same `_ensure_transformers_compat_shims()` helper as 4.6e.
+
+**Image resolution never controlled the OOM — `num_crops` does.** Check 3a
+first OOM'd on a single 672×672 image (already downsized from 1344×1344 in an
+attempt to fix it) at ~14GB, essentially all of the T4's VRAM, for what should
+have been a small forward pass. Reducing resolution further did not help,
+which was the signal something else was the actual lever. Confirmed via a
+direct user report on Phi-3-vision's own HF discussion page: resizing an
+input image can *increase* token count rather than reduce it, because the
+model's dynamic cropping tiling logic is driven by `num_crops` — a **processor**
+setting (default 16, confirmed in `preprocessor_config.json`), not by the
+image's pixel dimensions. At the default, one image produces ~17 total crops
+× ~144 tokens ≈ 2300+ tokens, and `eager` attention's O(n²) memory cost over
+that many tokens is what actually exhausted the T4 — the image resize changes
+were never touching the right variable. Fixed by setting `num_crops=4` at
+processor creation (Microsoft's own suggested value for memory-constrained
+use, cutting attention cost roughly `(4/16)² ≈ 6%` of the default). Added as
+`ModelManagerConfig.num_crops` (default `4`), threaded into
+`AutoProcessor.from_pretrained(..., num_crops=self.config.num_crops)`.
+
+**Real trade-off, not a free win**: NTT's own `test.py` never overrides
+`num_crops`, meaning their released checkpoints were almost certainly
+fine-tuned and evaluated against the default of 16. Dropping to 4 may cost
+retrieval/generation quality, not just save memory — this is a deliberate,
+flagged compromise to get the pipeline running on T4 hardware at all, not a
+claim that 4 is equivalent to 16. Revisit once Check 3a/3b produce real
+quality signal (does retrieval ordering still come out correct? does generation
+still produce sane answers?), and treat `num_crops` as a tunable worth
+re-testing at higher values if a larger GPU becomes available later.
+
 ### 4.6a — `vdocrag` vs `vdocrag_app`: a naming collision found the hard way
 Our own local package was originally named `vdocrag`. NTT's released package is
 **also** named `vdocrag` (`setup(name='vdocrag', ...)` in their `setup.py`, read
