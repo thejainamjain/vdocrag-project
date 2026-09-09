@@ -1,11 +1,23 @@
-# Installed fresh at the start of every Colab session (never vendored — see
-# docs/licenses.md for why NTT's package specifically must be installed by
-# URL rather than copied into this repo).
+# Installed in TWO separate pip calls, not one `pip install -r requirements-colab.txt`
+# pass -- see the huggingface-hub note below for why. The actual notebooks
+# (00_smoke_test.ipynb, 01_wrapper_test.ipynb, run_in_colab.ipynb) run these as
+# sequential shell commands directly; this file is a readable reference of
+# what's installed and why, not something to feed straight to `pip install -r`.
 #
 # poppler-utils (system package, not pip) is required by pdf2image and must
 # be installed separately: !apt-get install -y poppler-utils
 
-transformers==4.42.0
+# --- Phase 1: main dependencies, one pip install call ---
+
+# Pinned to the last 4.x release before transformers' 5.0 major version.
+# 5.x ships a substantially refactored attention-dispatch mechanism that
+# breaks Phi-3-vision's custom trust_remote_code modeling file -- confirmed
+# by hitting this directly in Step 1: an unpinned install grabbed 5.16.1 and
+# attn_implementation="eager" silently failed with a flash-attention
+# ValueError it never asked for. 4.57.3 is late enough in the 4.x line to
+# have modern prebuilt wheels (avoiding an earlier tokenizers source-build
+# failure from pinning too old a version), while staying pre-5.0.
+transformers==4.57.3
 accelerate
 bitsandbytes
 peft
@@ -19,3 +31,22 @@ pandas
 # state we tested against is known-good; unpinned for now during initial
 # smoke testing.
 git+https://github.com/nttmdlab-nlp/VDocRAG.git
+
+# --- Phase 2: force-correct a transitive conflict, SEPARATE pip install call, run AFTER phase 1 ---
+
+# huggingface-hub had a major version bump to 1.0; transformers==4.57.3 hard-
+# requires <1.0 and crashes at import time otherwise (confirmed: this is a
+# real, open issue -- huggingface/transformers#42670). gradio's dependency
+# chain pulls in the newest huggingface-hub by default. gradio's own declared
+# range wants >=1.16.0, but that's a pip metadata conflict, not a runtime hard
+# check the way transformers' is -- our app only uses plain gr.Blocks/File/
+# Textbox/Gallery, no Hub-specific gradio features, so the older pin below is
+# expected to work despite the resolver warning.
+#
+# This MUST run as its own `pip install` command after phase 1 completes --
+# putting it in the same requirements file/resolve pass as unpinned gradio
+# would make pip's resolver hard-fail on the contradiction instead of quietly
+# picking this version: a single resolve pass tries to satisfy every
+# constraint at once, while a later separate command can freely override
+# what an earlier one installed.
+huggingface-hub==0.35.3
