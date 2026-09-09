@@ -54,5 +54,11 @@ running top-to-bottom is more reliable than it feels like it should be.
   `transformers` (twice: the 4.x/5.x major-version break, and the
   `huggingface-hub` transitive conflict) is the repeat offender. When adding
   a new dependency, assume it needs a pin until proven otherwise, not the
-  other way around.
+  other way around. This includes `torch` itself: Colab ships a working
+  CUDA-enabled build by default, but `accelerate`/`bitsandbytes`/`peft`/
+  `gradio`'s own version requirements can cause pip to silently swap it for
+  a CPU-only build from plain PyPI if `torch` isn't pinned in the same
+  install command — confirmed happening (`AssertionError: Torch not
+  compiled with CUDA enabled`, right after a `pip install` cell that never
+  mentioned torch at all). Every notebook now pins `torch` explicitly.
   
