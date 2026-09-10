@@ -110,17 +110,23 @@ class ModelManagerConfig:
     # via `resolved_dtype` below -- kept as a string here so this dataclass
     # (and everything that imports it) stays importable without torch present.
     load_in_4bit: bool = True
-    num_crops: int = 4  # NOT the model's default of 16 -- see handoff doc Section
-    # 6.1 update. Confirmed empirically that num_crops (a processor setting), not
-    # image pixel size, controls actual token count / eager-attention memory cost
-    # -- resizing images does NOT reliably reduce memory and can even increase
-    # token count depending on aspect ratio. Default 16 produces ~2300+ tokens/
-    # image under eager attention and OOMs a T4 on a single image. 4 is
-    # Microsoft's own suggested value for memory-constrained use, cutting
-    # attention cost roughly (4/16)^2. Real trade-off, not a free win: NTT's
-    # checkpoints were fine-tuned against the default (their test.py never
-    # overrides this), so retrieval/generation quality may be affected --
-    # revisit once the pipeline runs end-to-end and real quality data exists.
+    num_crops: int = 8  # bumped from 4 -- see handoff doc Section 6.1/4.6g update.
+    # 4 was the original memory-safety default; confirmed in real usage (not just
+    # NTT's two example queries) that it degrades generation badly on anything
+    # requiring fine detail -- a real PDF chart with 6 small printed values
+    # produced "12, 14, 16, 18" against actual values in the thousands, clearly
+    # not read off the image at all. Retrieval tolerated num_crops=4 fine
+    # (holistic matching); generation needs the detail. 8 is a middle ground
+    # (Microsoft's own suggested "multi-image" value) -- NOT confirmed safe on
+    # VRAM yet for a real multi-page PDF at TOP_K images together; paired with
+    # dropping TOP_K to 2 (app_state.py) specifically because generation's
+    # memory cost scales with total tokens across ALL images concatenated into
+    # one sequence (attention is computed over the whole combined context at
+    # once), unlike retrieval which processes each image as an independent
+    # forward pass -- so image *count* hurts generation memory quadratically in
+    # a way it doesn't hurt retrieval. If this OOMs, drop TOP_K to 1 before
+    # dropping num_crops back down, since retrieval already proved robust to
+    # num_crops=4 and doesn't need to move.
 
     @property
     def resolved_dtype(self):

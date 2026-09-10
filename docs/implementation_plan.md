@@ -415,6 +415,42 @@ pages) against a higher `num_crops` per page, since VRAM scales with
 further work — proceeding to Step 2 with this documented as a known,
 intentional trade-off rather than an unresolved bug.
 
+### 4.6h — Confirmed in real usage; `num_crops=8` + `TOP_K=2` experiment underway
+The `num_crops=4` generation-accuracy cost predicted in 4.6g wasn't just a
+two-example-query artifact — confirmed on a real uploaded PDF. Question asked
+about specific values in a Revenue bar chart (6 bars, small printed values in
+the thousands of crore); retrieval correctly found the right page (similarity
+0.559, top result), but generation answered `"12, 14, 16, 18"` — not close to
+the real values, not even the right order of magnitude, indicating the model
+wasn't reading the chart at all rather than misreading it slightly.
+
+**Change made, not yet empirically confirmed safe on VRAM**: `num_crops`
+4 → 8 (`model_manager.py`), `TOP_K` 3 → 2 (`app_state.py`), changed together
+deliberately. Reasoning: retrieval processes each candidate image as an
+independent forward pass, so its memory cost scales with `num_crops` alone,
+roughly per-image — already proven robust at `num_crops=4` and not touched
+here. Generation is different: all `TOP_K` retrieved images get concatenated
+into *one* sequence that the model attends over jointly, so its memory cost
+scales with the *combined* token count across every image in context at
+once — meaning image count and per-image detail both hit the same quadratic
+attention cost, and trading one against the other (fewer images, more detail
+each) is a real lever, not a coincidence of two unrelated settings.
+
+Rough math, not a guarantee: `num_crops=8` gives ~9 crops/image vs ~5 at
+`num_crops=4` (~1.8x more tokens/image). Combined with dropping from 3 images
+to 2 (2/3 the images), the net combined-sequence-length change is
+`(9×2)/(5×3) = 1.2x` — modest — but since memory cost scales with the
+*square* of combined length, the actual attention-memory delta is closer to
+`1.2² ≈ 1.44x` over the previous (4 crops, 3 images) configuration, not the
+`(8/4)² = 4x` a naive "just double num_crops" would have cost. This is an
+estimate reasoned from the measured Step 3 numbers (retrieval's incremental
+cost for 2 images at `num_crops=4` was ~3.1GB over the ~2.5GB base), not a
+confirmed result — the exact split between quadratic (attention) and linear
+(embedding/KV) memory costs isn't fully isolated from the data we have.
+**Next action**: retest against the same real PDF and question that surfaced
+this problem. If it OOMs, drop `TOP_K` to 1 before lowering `num_crops` back
+down — retrieval doesn't need to move, generation does.
+
 ### 4.6a — `vdocrag` vs `vdocrag_app`: a naming collision found the hard way
 Our own local package was originally named `vdocrag`. NTT's released package is
 **also** named `vdocrag` (`setup(name='vdocrag', ...)` in their `setup.py`, read

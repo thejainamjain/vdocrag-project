@@ -25,7 +25,15 @@ EMBEDDING_DIM = 3072  # Phi-3-vision hidden size; confirm against a real
 # rather than silently corrupting the index, so this is a safe default to
 # start from, not a silent assumption.
 
-TOP_K = 3  # matches the paper's own finding (supplementary Figure C)
+TOP_K = 2  # dropped from 3 -- paired with model_manager.py's num_crops bump
+# (4 -> 8). Generation's memory cost scales with total tokens across ALL
+# retrieved images concatenated into one sequence, so fewer images bought
+# headroom for more detail per image. Confirmed necessary in real usage: at
+# num_crops=4/TOP_K=3, generation couldn't read specific values off a chart
+# (produced plausible-looking but wrong numbers, not a read failure -- a
+# guess). This trades a bit of multi-page context (the paper's own finding
+# that k=3 is optimal, Figure C) for per-image fidelity -- worth revisiting
+# with real quality data once this combination is confirmed to fit on a T4.
 
 
 @dataclass
@@ -154,3 +162,4 @@ class VDocRAGApp:
         answer = self.generator.answer(question, retrieved_images)
 
         return AskResult(answer=answer, retrieved_pages=results)
+    
