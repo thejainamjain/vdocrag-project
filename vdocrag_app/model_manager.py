@@ -110,7 +110,7 @@ class ModelManagerConfig:
     # via `resolved_dtype` below -- kept as a string here so this dataclass
     # (and everything that imports it) stays importable without torch present.
     load_in_4bit: bool = True
-    num_crops: int = 14  # bumped from 4 -- see handoff doc Section 6.1/4.6g update.
+    num_crops: int = 12  # bumped from 4 -- see handoff doc Section 6.1/4.6g update.
     # 4 was the original memory-safety default; confirmed in real usage (not just
     # NTT's two example queries) that it degrades generation badly on anything
     # requiring fine detail -- a real PDF chart with 6 small printed values
