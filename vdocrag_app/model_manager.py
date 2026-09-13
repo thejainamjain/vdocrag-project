@@ -110,23 +110,21 @@ class ModelManagerConfig:
     # via `resolved_dtype` below -- kept as a string here so this dataclass
     # (and everything that imports it) stays importable without torch present.
     load_in_4bit: bool = True
-    num_crops: int = 12  # bumped from 4 -- see handoff doc Section 6.1/4.6g update.
-    # 4 was the original memory-safety default; confirmed in real usage (not just
-    # NTT's two example queries) that it degrades generation badly on anything
-    # requiring fine detail -- a real PDF chart with 6 small printed values
-    # produced "12, 14, 16, 18" against actual values in the thousands, clearly
-    # not read off the image at all. Retrieval tolerated num_crops=4 fine
-    # (holistic matching); generation needs the detail. 8 is a middle ground
-    # (Microsoft's own suggested "multi-image" value) -- NOT confirmed safe on
-    # VRAM yet for a real multi-page PDF at TOP_K images together; paired with
-    # dropping TOP_K to 2 (app_state.py) specifically because generation's
-    # memory cost scales with total tokens across ALL images concatenated into
-    # one sequence (attention is computed over the whole combined context at
-    # once), unlike retrieval which processes each image as an independent
-    # forward pass -- so image *count* hurts generation memory quadratically in
-    # a way it doesn't hurt retrieval. If this OOMs, drop TOP_K to 1 before
-    # dropping num_crops back down, since retrieval already proved robust to
-    # num_crops=4 and doesn't need to move.
+    num_crops: int = 16  # NTT's own default -- what their checkpoints were
+    # actually fine-tuned against. Every lower value tried tonight (4, then 8,
+    # then a live-session-only 12) was a deliberate deviation for T4 memory
+    # safety, each confirmed costing generation accuracy on real questions --
+    # most recently, a question about a chart's own year labels returned
+    # "FY2018", a year that doesn't appear anywhere in the data (FY21-FY26),
+    # suggesting the model wasn't grounding its answer in the image at all at
+    # num_crops=12/TOP_K=2. Testing the full default now, paired with TOP_K=1
+    # (app_state.py) specifically to isolate one variable: can the model read
+    # ONE page correctly at full fidelity, before reintroducing multi-page
+    # context as a possible confound. Indexing itself is safe regardless of
+    # num_crops now (see Section 4.6i's per-page-loop fix) -- this risk is
+    # specifically about generation, which still combines TOP_K images into
+    # one sequence. If this OOMs during generation, TOP_K=1 is already the
+    # minimum -- the next lever would be num_crops itself, not TOP_K.
 
     @property
     def resolved_dtype(self):
@@ -302,4 +300,3 @@ class ModelManager:
             }
         except Exception:
             return {"vram_allocated_gb": 0.0, "vram_peak_gb": 0.0}
-        

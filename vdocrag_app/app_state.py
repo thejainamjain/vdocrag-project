@@ -25,15 +25,17 @@ EMBEDDING_DIM = 3072  # Phi-3-vision hidden size; confirm against a real
 # rather than silently corrupting the index, so this is a safe default to
 # start from, not a silent assumption.
 
-TOP_K = 2  # dropped from 3 -- paired with model_manager.py's num_crops bump
-# (4 -> 8). Generation's memory cost scales with total tokens across ALL
-# retrieved images concatenated into one sequence, so fewer images bought
-# headroom for more detail per image. Confirmed necessary in real usage: at
-# num_crops=4/TOP_K=3, generation couldn't read specific values off a chart
-# (produced plausible-looking but wrong numbers, not a read failure -- a
-# guess). This trades a bit of multi-page context (the paper's own finding
-# that k=3 is optimal, Figure C) for per-image fidelity -- worth revisiting
-# with real quality data once this combination is confirmed to fit on a T4.
+TOP_K = 1  # dropped further, from 2 -- paired with model_manager.py's
+# num_crops bump to 16 (NTT's own default). Deliberately isolating one
+# variable: can the model read a SINGLE page correctly at full fidelity,
+# before reintroducing multi-page context as a possible confound. A recent
+# test at num_crops=12/TOP_K=2 answered a chart-year question with "FY2018"
+# -- a year not present anywhere in the actual data -- which looks less like
+# "insufficient visual detail" and more like confusion across the 2 combined
+# pages, so isolating to 1 page is as much a diagnostic step as a memory
+# saving. This trades away the paper's own optimal k=3 (Figure C) entirely
+# for now -- revisit once num_crops=16/TOP_K=1 gives a clean read on whether
+# full-detail single-page generation is actually accurate.
 
 
 @dataclass
@@ -162,4 +164,3 @@ class VDocRAGApp:
         answer = self.generator.answer(question, retrieved_images)
 
         return AskResult(answer=answer, retrieved_pages=results)
-    
