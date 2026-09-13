@@ -100,19 +100,23 @@ class VDocRetrieverWrapper:
 
     @log_call("retriever")
     def encode_documents_batch(self, images: list[Image.Image]) -> np.ndarray:
-        """Batched version of encode_document -- matches NTT's own
-        `doc_inputs` stacking pattern in test.py, one processor call per
-        image (their processor doesn't support batched multi-image calls
-        directly) followed by a single stacked forward pass. Cuts per-page
-        Python/dispatch overhead relative to calling encode_document() in a
-        loop, though the forward pass itself still scales with batch size."""
+        """Encodes each page independently in a loop, NOT a single stacked
+        batched forward pass. This used to batch all pages into one
+        torch.stack() call, which meant a PDF's memory cost scaled with
+        page count (a 3-page PDF costing ~3x whatever one page costs, all
+        held simultaneously) -- confirmed causing an OOM on a real 3-page
+        PDF at num_crops=12, despite the base model alone using only ~4.1GB.
+        Looping keeps peak memory bounded by the single largest page,
+        regardless of how many pages the PDF has -- the same fix already
+        proven necessary for Step 1's Check 3a OOM."""
         import torch
 
         model = self._mm.use_retriever()
         processor = self._mm.processor
 
-        collated = [
-            processor(
+        embeddings = []
+        for img in images:
+            inputs = processor(
                 DOC_PROMPT,
                 images=prepare_doc_image(img),
                 return_tensors="pt",
@@ -120,16 +124,14 @@ class VDocRetrieverWrapper:
                 max_length=DOC_MAX_LENGTH,
                 truncation=True,
             ).to("cuda:0")
-            for img in images
-        ]
-        doc_inputs = {
-            key: torch.stack([item[key][0] for item in collated], dim=0)
-            for key in ["input_ids", "attention_mask", "pixel_values", "image_sizes"]
-        }
 
-        with torch.no_grad():
-            output = model(document=doc_inputs, use_cache=False)
+            with torch.no_grad():
+                output = model(document=inputs, use_cache=False)
 
-        embeddings = output.p_reps.detach().cpu().float().numpy()
-        logger.info(f"Batch-encoded {len(images)} document images")
-        return embeddings
+            embeddings.append(output.p_reps[0].detach().cpu().float().numpy())
+            del inputs, output
+            torch.cuda.empty_cache()
+
+        logger.info(f"Batch-encoded {len(images)} document images (per-page loop)")
+        return np.stack(embeddings)
+    

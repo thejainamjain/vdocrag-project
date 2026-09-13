@@ -451,6 +451,41 @@ confirmed result — the exact split between quadratic (attention) and linear
 this problem. If it OOMs, drop `TOP_K` to 1 before lowering `num_crops` back
 down — retrieval doesn't need to move, generation does.
 
+### 4.6i — The real bug wasn't `num_crops` at all: `encode_documents_batch` batched every page into one forward pass
+Testing `num_crops=12` (further increased from 4.6h's `8`) surfaced a much
+more important finding: model load alone used only ~4.1GB, but uploading a
+real **3-page** PDF exhausted all available VRAM. That gap — fine with zero
+pages, broken with three — pointed away from "the model needs too much
+memory" and toward "our own indexing code scales badly with page count."
+
+Confirmed by reading the code: `VDocRetrieverWrapper.encode_documents_batch()`
+stacked every page's processed tensors into a single `torch.stack(...)` batch
+and ran **one** forward pass across all pages simultaneously. A 3-page PDF's
+peak memory was therefore roughly 3× whatever one page cost, all held at
+once — and at higher `num_crops`, one page alone already costs substantially
+more than at `4`, so the multiplication by page count pushed it over the
+edge. This is the exact same class of bug as Step 1's Check 3a OOM (also
+fixed by switching from a batched call to a per-image loop) — it just hadn't
+been caught in the real indexing path until a real multi-page PDF exercised it.
+
+**Fix**: rewrote `encode_documents_batch()` to loop over pages one at a time
+(matching `encode_document()`'s already-proven-correct single-image logic),
+calling `torch.cuda.empty_cache()` between each, rather than stacking them
+into one batch. Peak memory during indexing is now bounded by the single
+largest page, independent of how many pages the PDF has. Interface (`list[Image] -> np.ndarray`
+of shape `(n, dim)`) is unchanged, so `app_state.py`'s `index_pdf()` needed no
+changes.
+
+**Why this matters beyond just fixing the crash**: this reframes the whole
+"should we switch to a smaller model" question from 4.6h onward. The
+generation-accuracy problem (can't read fine print at low `num_crops`) is
+real and still needs the `num_crops`/`TOP_K` trade-off. But the *indexing*
+OOM was never actually a model-capacity problem — it was an implementation
+bug that would have eventually bitten at *any* `num_crops` value once a PDF
+had enough pages. Worth retesting `num_crops=12` (or even higher) now that
+per-page memory is properly bounded, before concluding the current model is
+too constrained and switching architectures entirely.
+
 ### 4.6a — `vdocrag` vs `vdocrag_app`: a naming collision found the hard way
 Our own local package was originally named `vdocrag`. NTT's released package is
 **also** named `vdocrag` (`setup(name='vdocrag', ...)` in their `setup.py`, read
