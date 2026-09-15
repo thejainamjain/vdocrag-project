@@ -110,21 +110,20 @@ class ModelManagerConfig:
     # via `resolved_dtype` below -- kept as a string here so this dataclass
     # (and everything that imports it) stays importable without torch present.
     load_in_4bit: bool = True
-    num_crops: int = 16  # NTT's own default -- what their checkpoints were
-    # actually fine-tuned against. Every lower value tried tonight (4, then 8,
-    # then a live-session-only 12) was a deliberate deviation for T4 memory
-    # safety, each confirmed costing generation accuracy on real questions --
-    # most recently, a question about a chart's own year labels returned
-    # "FY2018", a year that doesn't appear anywhere in the data (FY21-FY26),
-    # suggesting the model wasn't grounding its answer in the image at all at
-    # num_crops=12/TOP_K=2. Testing the full default now, paired with TOP_K=1
-    # (app_state.py) specifically to isolate one variable: can the model read
-    # ONE page correctly at full fidelity, before reintroducing multi-page
-    # context as a possible confound. Indexing itself is safe regardless of
-    # num_crops now (see Section 4.6i's per-page-loop fix) -- this risk is
-    # specifically about generation, which still combines TOP_K images into
-    # one sequence. If this OOMs during generation, TOP_K=1 is already the
-    # minimum -- the next lever would be num_crops itself, not TOP_K.
+    num_crops: int = 12  # confirmed ceiling for this T4, found by bisection.
+    # num_crops=16 (NTT's own default) was tested in a genuinely clean, freshly
+    # restarted session and OOM'd DURING INDEXING -- a SINGLE page (indexing
+    # processes one page at a time since the 4.6i per-page-loop fix), on top of
+    # the ~5GB already used by the loaded model, exhausted the T4. This is a
+    # clean result specifically because it happened at indexing time, which is
+    # independent of TOP_K entirely -- proves 16 doesn't fit for even one page,
+    # not a multi-image/TOP_K artifact. num_crops=12 is the highest value with
+    # solid evidence of actually working (confirmed indexing 3 real pages
+    # successfully). The earlier "FY2018" wrong-answer result at num_crops=12
+    # was with TOP_K=2; paired with TOP_K=1 (app_state.py) now to isolate
+    # whether that was multi-page confusion rather than insufficient detail --
+    # this is the cleanest test available on this hardware: the highest crop
+    # count confirmed to fit, with only one retrieved page in context.
 
     @property
     def resolved_dtype(self):
@@ -300,3 +299,4 @@ class ModelManager:
             }
         except Exception:
             return {"vram_allocated_gb": 0.0, "vram_peak_gb": 0.0}
+        
