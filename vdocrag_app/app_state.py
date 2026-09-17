@@ -25,7 +25,7 @@ EMBEDDING_DIM = 3072  # Phi-3-vision hidden size; confirm against a real
 # rather than silently corrupting the index, so this is a safe default to
 # start from, not a silent assumption.
 
-TOP_K = 1  # dropped further, from 2 -- paired with model_manager.py's
+TOP_K = 2  # dropped further, from 2 -- paired with model_manager.py's
 # generator_num_crops=16 (NTT's own default), which is now ACTUALLY wired up
 # via configure_num_crops_for("generator") -- this comment previously stated
 # that pairing as done when the num_crops split hadn't been implemented yet
