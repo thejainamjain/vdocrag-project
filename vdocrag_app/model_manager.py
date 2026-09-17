@@ -110,20 +110,42 @@ class ModelManagerConfig:
     # via `resolved_dtype` below -- kept as a string here so this dataclass
     # (and everything that imports it) stays importable without torch present.
     load_in_4bit: bool = True
-    num_crops: int = 12  # confirmed ceiling for this T4, found by bisection.
-    # num_crops=16 (NTT's own default) was tested in a genuinely clean, freshly
-    # restarted session and OOM'd DURING INDEXING -- a SINGLE page (indexing
-    # processes one page at a time since the 4.6i per-page-loop fix), on top of
-    # the ~5GB already used by the loaded model, exhausted the T4. This is a
-    # clean result specifically because it happened at indexing time, which is
-    # independent of TOP_K entirely -- proves 16 doesn't fit for even one page,
-    # not a multi-image/TOP_K artifact. num_crops=12 is the highest value with
-    # solid evidence of actually working (confirmed indexing 3 real pages
-    # successfully). The earlier "FY2018" wrong-answer result at num_crops=12
-    # was with TOP_K=2; paired with TOP_K=1 (app_state.py) now to isolate
-    # whether that was multi-page confusion rather than insufficient detail --
-    # this is the cleanest test available on this hardware: the highest crop
-    # count confirmed to fit, with only one retrieved page in context.
+
+    # --- num_crops, split by role (was a single shared value; see below) ---
+    #
+    # The num_crops=16 OOM previously recorded here happened during INDEXING --
+    # i.e. inside VDocRetriever's encode_document forward pass -- not during
+    # generation. Retrieval and generation don't need to pay the same
+    # resolution cost: a single pooled dense vector (retrieval) is inherently
+    # more forgiving of downsampling than free-form text reading (generation,
+    # where the model has to actually read small numbers/labels off the page).
+    # Microsoft's own Phi-3-vision usage examples follow this same split --
+    # a lower num_crops for ordinary single-image inputs, reserving the higher
+    # setting for cases that need full document/chart-reading fidelity.
+    #
+    # So: give retrieval a cheap, low crop count (this is what actually fixes
+    # the num_crops=16 indexing OOM -- it was never a generation-time problem),
+    # which frees enough headroom to give generation back NTT's own full
+    # default. That default is very likely the real fix for wrong/garbled
+    # answers at generation time, since it's the resolution their generator
+    # checkpoint was fine-tuned against -- num_crops=12 for generation was
+    # always a memory-driven compromise, not a value with any evidence behind
+    # it being *sufficient* for reading fine chart/table detail correctly.
+    #
+    # retriever_num_crops=4 has NOT been bisection-tested on this T4 the way
+    # 12 was -- treat it as a starting point. If indexing OOMs at 4, bisect
+    # downward (Phi-3-vision's HD-transform accepts num_crops=1 as a floor).
+    retriever_num_crops: int = 4
+
+    # generator_num_crops=16 matches NTT's own shipped default (see their
+    # preprocessor_config.json) and their README/test.py usage -- NOT yet
+    # confirmed to fit on this T4 in isolation (no GPU available to verify
+    # from here). If a single top-1 generation call OOMs at 16, bisect
+    # downward the same way retrieval's ceiling of 12 was originally found --
+    # try 14, then 12, etc. Do this bisection BEFORE assuming the num_crops
+    # split itself didn't help; the split is what frees the room to try 16
+    # at all, it doesn't guarantee 16 specifically fits.
+    generator_num_crops: int = 16
 
     @property
     def resolved_dtype(self):
@@ -178,8 +200,16 @@ class ModelManager:
 
         from transformers import AutoProcessor
 
+        # Constructed with generator_num_crops as the initial value (the
+        # quality-sensitive, "main" setting) -- retriever.py explicitly resets
+        # this to retriever_num_crops immediately before every image-bearing
+        # retrieval call via configure_num_crops_for("retriever"), and
+        # generator.py resets it back before every generation call via
+        # configure_num_crops_for("generator"). See that method below for why
+        # a single shared processor instance is safe here (no concurrent
+        # requests in this app).
         self.processor = AutoProcessor.from_pretrained(
-            MODEL_ID, trust_remote_code=True, num_crops=self.config.num_crops
+            MODEL_ID, trust_remote_code=True, num_crops=self.config.generator_num_crops
         )
 
         if self.mode == "shared":
@@ -262,6 +292,42 @@ class ModelManager:
             config=self._load_config(), **common_kwargs
         ).to("cuda:0")
 
+    def configure_num_crops_for(self, role: Literal["retriever", "generator"]) -> None:
+        """Mutates the shared processor's image-processor num_crops in place,
+        immediately before an image-bearing call. Phi-3-vision's image
+        processor stores num_crops as a plain instance attribute
+        (`self.num_crops`, set in Phi3VImageProcessor.__init__ and read again
+        at preprocess() time) -- it's a mutable, non-frozen attribute, so
+        resetting it right before each call is a legitimate, low-risk way to
+        get two different resolutions out of one processor instance, without
+        needing two separate AutoProcessor objects.
+
+        SAFETY NOTE -- this makes num_crops shared *mutable* state, which is
+        only correct because this app handles one request at a time (a single
+        Gradio session, no concurrent index_pdf()/ask() calls in flight
+        together). If this app is ever changed to serve concurrent requests
+        (e.g. Gradio's queueing turned into true parallelism, or multiple
+        users sharing one ModelManager), this method becomes a race condition
+        -- two in-flight calls could stomp on each other's num_crops setting
+        between "set" and "actually building the processor(...) inputs".
+        Fix at that point would be per-request processor instances (cheap --
+        the image processor itself holds no model weights) rather than one
+        shared mutable processor.
+        """
+        self._require_loaded()
+        target = self.config.retriever_num_crops if role == "retriever" else self.config.generator_num_crops
+
+        # Phi3VProcessor exposes the image processor as `.image_processor`
+        # (standard transformers Processor convention); fall back to setting
+        # it directly on the processor object in case a future transformers/
+        # NTT-package version changes that convention -- either path ends up
+        # mutating the same underlying attribute Phi3VImageProcessor.preprocess()
+        # reads from.
+        target_obj = getattr(self.processor, "image_processor", self.processor)
+        if getattr(target_obj, "num_crops", None) != target:
+            target_obj.num_crops = target
+            logger.info(f"Set num_crops={target} for role='{role}'")
+
     def use_retriever(self):
         """Call before any retriever forward pass. Swaps the active LoRA
         adapter in "shared" mode (~50ms, per the PEFT hot-swap reference
@@ -299,4 +365,3 @@ class ModelManager:
             }
         except Exception:
             return {"vram_allocated_gb": 0.0, "vram_peak_gb": 0.0}
-        

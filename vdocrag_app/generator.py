@@ -57,6 +57,11 @@ class VDocGeneratorWrapper:
         images (already in relevance order from DocumentIndex.search()).
         Returns the decoded answer string, stripped."""
         model = self._mm.use_generator()
+        self._mm.configure_num_crops_for("generator")  # see model_manager.py --
+        # generation intentionally uses a higher crop count than retrieval,
+        # matching NTT's own default, since this is where the model actually
+        # has to read fine detail (numbers, labels) off the page rather than
+        # just produce a pooled similarity vector.
         processor = self._mm.processor
 
         if not images:
@@ -96,4 +101,3 @@ class VDocGeneratorWrapper:
             }},
         )
         return response
-    

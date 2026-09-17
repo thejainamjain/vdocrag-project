@@ -85,6 +85,11 @@ class VDocRetrieverWrapper:
         import torch
 
         model = self._mm.use_retriever()
+        self._mm.configure_num_crops_for("retriever")  # see model_manager.py
+        # -- retrieval intentionally uses a lower crop count than generation;
+        # this is what fixes the num_crops=16 OOM previously hit at indexing
+        # time, and frees room for generator.py to use a higher, quality-
+        # sensitive crop count for actually reading the page.
         processor = self._mm.processor
 
         prepared = prepare_doc_image(image)
@@ -112,6 +117,8 @@ class VDocRetrieverWrapper:
         import torch
 
         model = self._mm.use_retriever()
+        self._mm.configure_num_crops_for("retriever")  # once per batch is enough --
+        # every page in this loop is encoded at the same (retrieval) crop count.
         processor = self._mm.processor
 
         embeddings = []
